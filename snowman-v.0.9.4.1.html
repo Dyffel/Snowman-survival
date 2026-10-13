@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover,user-scalable=no"><title>SNOWMAN v0.9.4.1 — Combat fix</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;height:100dvh;overflow:hidden;background:#132b32;font-family:system-ui,-apple-system,sans-serif;touch-action:none}
+body{display:flex;align-items:center;justify-content:center}
+#layout{display:flex;flex-direction:column;align-items:center;justify-content:center;width:100%;height:100%;gap:0}
+#game{position:relative;width:min(100vw,100dvh);height:min(100vw,100dvh);aspect-ratio:1;background:#edf9f7;overflow:hidden;flex:none;box-shadow:0 0 0 2px #557a7c}
+canvas{display:block;width:100%;height:100%;touch-action:none}
+#label{position:absolute;top:10px;left:12px;font-weight:900;letter-spacing:1px;color:#2d6665;font-size:clamp(12px,2.7vw,16px);pointer-events:none}#label small{font-weight:500;letter-spacing:0}
+#controls{display:none;flex:none;align-items:center;justify-content:center;width:100%;height:190px;touch-action:none;user-select:none;-webkit-user-select:none;position:relative}
+#dpad{width:220px;height:188px;display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);gap:0;touch-action:none;user-select:none;-webkit-user-select:none}
+.dir{border:0;border-radius:18px;background:#b9e7de;color:#285c56;font-size:26px;font-weight:900;display:flex;align-items:center;justify-content:center;touch-action:none;-webkit-tap-highlight-color:transparent;cursor:pointer;padding:0;box-shadow:inset 0 0 0 2px #a6d7d0;margin:2px}
+.dir.pressed{background:#61b8a7;color:white}
+.dir[data-dir="up"]{grid-column:2;grid-row:1}.dir[data-dir="left"]{grid-column:1;grid-row:2}.dir[data-dir="down"]{grid-column:2;grid-row:3}.dir[data-dir="right"]{grid-column:3;grid-row:2}
+#weapons{display:none;position:absolute;right:8px;top:12px;gap:8px;flex-direction:column}#weapons button{border:2px solid #92cbbf;border-radius:12px;background:#c9eee5;color:#245c54;font-weight:900;padding:11px 12px;font-size:13px;touch-action:manipulation;min-width:96px}#weapons button:disabled{opacity:.48}#mode{position:absolute;right:10px;top:12px;border:2px solid #92cbbf;border-radius:12px;background:#c9eee5;color:#245c54;font-weight:800;padding:13px 10px;touch-action:manipulation;font-size:13px}
+#mode.active{background:#65c9aa;color:#123f36}#mode.wood{background:#e4bd8e;border-color:#ad8251;color:#5d3e25}
+#status{position:absolute;right:9px;top:8px;display:flex;align-items:center;gap:6px;z-index:3;font-weight:800;color:#275f59;font-size:12px;background:#effff8ed;border:1px solid #a4d6cc;padding:6px 8px;border-radius:10px}#start{border:0;background:#64caa9;color:#10493c;border-radius:8px;padding:6px 10px;font-weight:900;cursor:pointer}#inventory{position:absolute;left:8px;bottom:8px;z-index:2;font-size:12px;color:#285f58;background:#edfff5ed;border-radius:8px;padding:6px 8px;font-weight:750}#hint{position:absolute;right:12px;bottom:12px;color:#28595a;font-size:12px;background:#e9fffaaf;border-radius:8px;padding:6px 9px;pointer-events:none}
+@media(pointer:coarse){#controls{display:flex}#game{width:min(100vw,calc(100dvh - 190px - env(safe-area-inset-bottom)));height:min(100vw,calc(100dvh - 190px - env(safe-area-inset-bottom)))}#hint{display:none}#controls:has(#mode.active) #dpad{opacity:.25;pointer-events:none}}
+@media(min-width:800px) and (pointer:fine){#game{border-radius:6px}}
+</style></head><body><div id="layout"><div id="game"><canvas id="screen" width="640" height="640"></canvas><div id="label">☃️ SNOWMAN <small>v0.9.4.1 · Combat fix</small></div><div id="status"><span id="phase">READY · 60s</span><button id="start">▶ START</button></div><div id="inventory">🪨 12 · 🪵 15 · 🌿 3</div><div id="hint">24×24 grid · WASD / Arrows · B switches block</div></div><div id="controls"><div id="dpad" aria-label="Movement controls"><button class="dir" data-dir="up" aria-label="Up">▲</button><button class="dir" data-dir="left" aria-label="Left">◀</button><button class="dir" data-dir="right" aria-label="Right">▶</button><button class="dir" data-dir="down" aria-label="Down">▼</button></div><button id="mode" type="button">🪨 BUILD</button><div id="weapons"><button id="laser" type="button">🔫 LASER</button><button id="bomb" type="button">💣 3</button></div></div></div>
+<script>
+'use strict';
+const canvas=document.getElementById('screen'),ctx=canvas.getContext('2d');
+const VIEW=640,WORLD=1280,R=20,SPEED=215;
+// 24 x 24 equal building tiles. Every quadrant has exactly 12 x 12 = 144 tiles.
+const GRID=24,TILE=WORLD/GRID;
+const starts=[{x:160,y:160},{x:1120,y:160},{x:160,y:1120},{x:1120,y:1120}];
+const teams=[{name:"Emerald",fill:"#42ad80",edge:"#19785c",shine:"#bafbe0"},{name:"Gold",fill:"#e3b647",edge:"#98711c",shine:"#fff3b0"},{name:"Diamond",fill:"#55a9dc",edge:"#2a709f",shine:"#d7f7ff"},{name:"Ruby",fill:"#df6c78",edge:"#9d354b",shine:"#ffe1e4"}];
+// Each corner has the same mirrored 5x5 fort: 3x3 gemstone floor,
+// a stone perimeter and a two-cell opening toward the middle of the arena.
+const baseTiles=new Map(),fortWalls=new Set();
+const fortOrigins=[{c:1,r:1,sx:1,sy:1},{c:22,r:1,sx:-1,sy:1},{c:1,r:22,sx:1,sy:-1},{c:22,r:22,sx:-1,sy:-1}];
+fortOrigins.forEach((f,team)=>{
+ for(let ly=0;ly<5;ly++)for(let lx=0;lx<5;lx++){
+  const col=f.c+lx*f.sx,row=f.r+ly*f.sy,key=row*GRID+col;
+  if(lx>=1&&lx<=3&&ly>=1&&ly<=3)baseTiles.set(key,team);
+  else if(lx===0||ly===0||lx===4||ly===4){
+   // Open two neighboring cells on the side facing the arena's center.
+   if(lx===4&&(ly===2||ly===3))continue;
+   fortWalls.add(key);
+  }
+ }
+});
+const player={x:starts[0].x,y:starts[0].y,hp:100,shield:0,facing:"right",bombs:3};let camera={x:0,y:0};
+const keys=new Set(),touchDirections=new Map();
+const rocks=new Set(),woods=new Set(),bushes=new Set();
+const LIMIT={rock:12,wood:15,bush:3};const weaponsEl=document.getElementById("weapons"),laserBtn=document.getElementById("laser"),bombBtn=document.getElementById("bomb");const bombs=[],beams=[],effects=[];let lastLaser=-1e9;const LASER_CD=3000;const dummy={x:460,y:270,hp:100};let phase='ready',secondsLeft=60,phaseClock=0;
+const phaseEl=document.getElementById('phase'),startBtn=document.getElementById('start'),inventoryEl=document.getElementById('inventory');
+function updateHud(){phaseEl.textContent=phase==='ready'?'READY · 60s':phase==='prep'?`BUILD · ${Math.ceil(secondsLeft)}s`:'⚔ BATTLE';startBtn.hidden=phase!=='ready';inventoryEl.textContent=`🪨 ${LIMIT.rock-rocks.size}  ·  🪵 ${LIMIT.wood-woods.size}  ·  🌿 ${LIMIT.bush-bushes.size}`;inventoryEl.hidden=phase==="battle";weaponsEl.style.display=phase==="battle"?"flex":"none";modeButton.style.display=phase==="battle"?"none":"block";}
+startBtn.addEventListener('click',()=>{phase='prep';secondsLeft=60;phaseClock=performance.now();updateHud()});
+let buildType=null;const modeButton=document.getElementById('mode');updateHud();
+const rockKey=(col,row)=>row*GRID+col;
+const directions={up:[0,-1],down:[0,1],left:[-1,0],right:[1,0]};
+function damagePlayer(amount){const shieldUsed=Math.min(player.shield,amount);player.shield-=shieldUsed;player.hp=Math.max(0,player.hp-(amount-shieldUsed));effects.push({x:player.x,y:player.y,t:performance.now(),label:`-${amount}`,color:'#d94d59'});if(player.hp<=0){player.hp=100;player.shield=0;player.x=starts[0].x;player.y=starts[0].y}}
+function shootLaser(){if(phase!=='battle')return;const now=performance.now();if(now-lastLaser<LASER_CD)return;lastLaser=now;const [dx,dy]=directions[player.facing];let sx=player.x,sy=player.y,ex=sx,ey=sy,hitDummy=false;const steps=5*TILE/5;
+ for(let d=5;d<=5*TILE;d+=5){const x=sx+dx*d,y=sy+dy*d,c=Math.floor(x/TILE),r=Math.floor(y/TILE);if(c<0||r<0||c>=GRID||r>=GRID)break;const k=rockKey(c,r);if(rocks.has(k)||woods.has(k)||fortWalls.has(k))break;ex=x;ey=y;if(dummy.hp>0&&Math.hypot(x-dummy.x,y-dummy.y)<R+7){dummy.hp=Math.max(0,dummy.hp-25);hitDummy=true;break}}
+ beams.push({sx,sy,ex,ey,t:now,hitDummy});}
+function placeBomb(){if(phase!=='battle'||player.bombs<=0)return;const c=Math.floor(player.x/TILE),r=Math.floor(player.y/TILE);player.bombs--;bombs.push({c,r,t:performance.now(),exploded:false});}
+laserBtn.addEventListener('click',shootLaser);bombBtn.addEventListener('click',placeBomb);
+function detonate(b,now){const bx=(b.c+.5)*TILE,by=(b.r+.5)*TILE;effects.push({x:bx,y:by,t:now,explosion:true});
+ // Blast travels out along 8 grid directions; solid rocks stop it, wood absorbs and breaks.
+ const impacted=new Set([rockKey(b.c,b.r)]);for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]]){for(let i=1;i<=3;i++){const c=b.c+dx*i,r=b.r+dy*i;if(c<0||r<0||c>=GRID||r>=GRID)break;const k=rockKey(c,r);if(fortWalls.has(k)||rocks.has(k)||baseTiles.has(k))break;impacted.add(k);if(woods.has(k)){woods.delete(k);break}}}
+ for(const k of impacted)bushes.delete(k);
+ const pc=rockKey(Math.floor(player.x/TILE),Math.floor(player.y/TILE)),dc=rockKey(Math.floor(dummy.x/TILE),Math.floor(dummy.y/TILE));
+ function blastDamage(key){if(!impacted.has(key))return 0;const c=key%GRID,r=Math.floor(key/GRID),dist=Math.max(Math.abs(c-b.c),Math.abs(r-b.r));return [100,75,50,25][dist]||0}
+ damagePlayer(blastDamage(pc));if(dummy.hp>0)dummy.hp=Math.max(0,dummy.hp-blastDamage(dc));}
+function updateCombat(now){for(let i=bombs.length-1;i>=0;i--)if(now-bombs[i].t>=2000){detonate(bombs[i],now);bombs.splice(i,1)}for(let i=beams.length-1;i>=0;i--)if(now-beams[i].t>220)beams.splice(i,1);for(let i=effects.length-1;i>=0;i--)if(now-effects[i].t>600)effects.splice(i,1);laserBtn.textContent=now-lastLaser<LASER_CD?`🔫 ${((LASER_CD-(now-lastLaser))/1000).toFixed(1)}s`:'🔫 LASER';bombBtn.textContent=`💣 ${player.bombs}`;bombBtn.disabled=player.bombs<=0;}
+
+function nearFort(col,row){for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){
+ const c=col+dx,r=row+dy;if(c<0||r<0||c>=GRID||r>=GRID)continue;
+ const k=rockKey(c,r);if(baseTiles.has(k)||fortWalls.has(k))return true;
+ }return false}
+function inRange(col,row){const cx=(col+.5)*TILE,cy=(row+.5)*TILE;return Math.hypot(cx-player.x,cy-player.y)<=3*TILE}
+function occupiedByPlayer(col,row){const cx=(col+.5)*TILE,cy=(row+.5)*TILE;return Math.abs(cx-player.x)<TILE*.75&&Math.abs(cy-player.y)<TILE*.75}
+function canEdit(col,row,type){if(col<0||row<0||col>=GRID||row>=GRID)return false;
+ // For now players may only build inside their own territory (top-left test player).
+ if(col>=GRID/2||row>=GRID/2)return false;
+ const key=rockKey(col,row);
+ if(baseTiles.has(key)||fortWalls.has(key)||!inRange(col,row))return false;
+ if(type==='rock'&&nearFort(col,row))return false;
+ return true}
+function validGroup(candidate,own){
+ const visited=new Set(),queue=[candidate];visited.add(candidate);
+ for(let i=0;i<queue.length;i++){
+  const k=queue[i],c=k%GRID,r=Math.floor(k/GRID);
+  for(const [dc,dr] of [[1,0],[-1,0],[0,1],[0,-1]]){
+   const nc=c+dc,nr=r+dr,nk=rockKey(nc,nr);
+   if(nc<0||nc>=GRID||nr<0||nr>=GRID||visited.has(nk)||!own.has(nk))continue;
+   visited.add(nk);queue.push(nk);if(queue.length>5)return false;
+  }
+ }return true;
+}
+function setMode(type){if(phase==='battle')type=null;buildType=type;modeButton.classList.toggle('active',!!type);modeButton.classList.toggle('wood',type==='wood');modeButton.textContent=phase==='battle'?'🔒 CLOSED':type==='rock'?'🪨 ROCK':type==='wood'?'🪵 WOOD':type==='bush'?'🌿 BUSH':'🪨 BUILD';clearInput()}
+// Tap to cycle: movement → rock placement → wood placement → movement.
+modeButton.addEventListener('click',()=>setMode(buildType===null?'rock':buildType==='rock'?'wood':buildType==='wood'?'bush':null));
+canvas.addEventListener('pointerdown',e=>{if(!buildType)return;e.preventDefault();const rect=canvas.getBoundingClientRect();
+ const x=(e.clientX-rect.left)/rect.width*VIEW+camera.x,y=(e.clientY-rect.top)/rect.height*VIEW+camera.y;
+ const col=Math.floor(x/TILE),row=Math.floor(y/TILE),key=rockKey(col,row);
+ if(phase==='battle'||!canEdit(col,row,buildType))return;
+ const own=buildType==='rock'?rocks:buildType==='wood'?woods:bushes,other=buildType==='rock'?woods:rocks;
+ if(own.has(key)){own.delete(key);updateHud();return}
+ if(other.has(key)||bushes.has(key)||rocks.has(key)||woods.has(key)||occupiedByPlayer(col,row))return;
+ if(own.size>=LIMIT[buildType])return;
+ if(buildType!=='bush'&&!validGroup(key,own))return;
+ own.add(key);updateHud();
+});
+
+const directionButtons=[...document.querySelectorAll('.dir')];
+function updateButtons(){for(const button of directionButtons){button.classList.toggle('pressed',[...touchDirections.values()].includes(button.dataset.dir))}}
+addEventListener('keydown',e=>{if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' ','w','a','s','d','W','A','S','D'].includes(e.key))e.preventDefault();if(phase==='battle'&&!e.repeat&&e.key.toLowerCase()==='f'){shootLaser();return}if(phase==='battle'&&!e.repeat&&e.key.toLowerCase()==='g'){placeBomb();return}if(e.key.toLowerCase()==='b'&&!e.repeat){setMode(buildType===null?'rock':buildType==='rock'?'wood':buildType==='wood'?'bush':null);return}keys.add(e.key.toLowerCase())});
+addEventListener('keyup',e=>keys.delete(e.key.toLowerCase()));
+function clearInput(){keys.clear();touchDirections.clear();updateButtons()}
+addEventListener('blur',clearInput);document.addEventListener('visibilitychange',()=>{if(document.hidden)clearInput()});
+const dpad=document.getElementById('dpad');
+function padDirection(e){const r=dpad.getBoundingClientRect(),x=(e.clientX-r.left)/r.width-.5,y=(e.clientY-r.top)/r.height-.5;
+ if(Math.abs(x)<.15&&Math.abs(y)<.15)return null;
+ return Math.abs(x)>Math.abs(y)?(x<0?'left':'right'):(y<0?'up':'down')}
+dpad.addEventListener('pointerdown',e=>{if(buildType)return;e.preventDefault();dpad.setPointerCapture(e.pointerId);const d=padDirection(e);if(d)touchDirections.set(e.pointerId,d);updateButtons()});
+dpad.addEventListener('pointermove',e=>{if(!touchDirections.has(e.pointerId))return;e.preventDefault();const d=padDirection(e);if(d)touchDirections.set(e.pointerId,d);updateButtons()});
+for(const ev of ['pointerup','pointercancel','lostpointercapture'])dpad.addEventListener(ev,e=>{touchDirections.delete(e.pointerId);updateButtons()});
+dpad.addEventListener('contextmenu',e=>e.preventDefault());
+function roundRect(x,y,w,h,r){ctx.beginPath();ctx.roundRect(x,y,w,h,r)}
+function draw(){
+ctx.clearRect(0,0,VIEW,VIEW);ctx.fillStyle='#eaf8f4';ctx.fillRect(0,0,VIEW,VIEW);
+ctx.save();ctx.translate(-camera.x,-camera.y);
+// Same arena, four symmetric starts; same arena and spawn points as v0.5.
+ctx.fillStyle='#f8fffc';ctx.fillRect(0,0,WORLD,WORLD);
+// Visible placement grid, aligned exactly across all four equally sized quadrants.
+ctx.beginPath();ctx.lineWidth=1;ctx.strokeStyle='#d8e8e4';
+for(let n=0;n<=GRID;n++){let p=n*TILE;ctx.moveTo(p,0);ctx.lineTo(p,WORLD);ctx.moveTo(0,p);ctx.lineTo(WORLD,p)}ctx.stroke();
+// Subtle boundary around each of the four equal 12x12 building territories.
+ctx.lineWidth=3;ctx.strokeStyle='#a4d2c7';
+for(let row=0;row<2;row++)for(let col=0;col<2;col++)ctx.strokeRect(col*WORLD/2+2,row*WORLD/2+2,WORLD/2-4,WORLD/2-4);
+ctx.strokeStyle='#b7d9d5';ctx.lineWidth=2;ctx.setLineDash([14,16]);ctx.beginPath();ctx.moveTo(WORLD/2,0);ctx.lineTo(WORLD/2,WORLD);ctx.moveTo(0,WORLD/2);ctx.lineTo(WORLD,WORLD/2);ctx.stroke();ctx.setLineDash([]);
+ctx.lineWidth=12;ctx.strokeStyle='#376d72';ctx.strokeRect(6,6,WORLD-12,WORLD-12);
+// Four matching 3x3 gemstone floors inside symmetric stone forts.
+// These are floor markings, not obstacles, so the character can safely spawn and walk across them.
+for(const [key,teamIndex] of baseTiles){
+ const col=key%GRID,row=Math.floor(key/GRID),x=col*TILE,y=row*TILE,t=teams[teamIndex];
+ ctx.fillStyle=t.fill;ctx.strokeStyle=t.edge;ctx.lineWidth=2;
+ roundRect(x+3,y+3,TILE-6,TILE-6,8);ctx.fill();ctx.stroke();
+ ctx.fillStyle=t.shine;ctx.globalAlpha=.65;
+ ctx.beginPath();ctx.moveTo(x+9,y+14);ctx.lineTo(x+20,y+7);ctx.lineTo(x+TILE-11,y+13);ctx.lineTo(x+TILE-18,y+23);ctx.closePath();ctx.fill();ctx.globalAlpha=1;
+ ctx.fillStyle=t.edge;ctx.globalAlpha=.17;ctx.beginPath();ctx.moveTo(x+8,y+TILE-13);ctx.lineTo(x+TILE-9,y+TILE-13);ctx.lineTo(x+TILE-15,y+TILE-7);ctx.closePath();ctx.fill();ctx.globalAlpha=1;
+}
+// Fort perimeter stones use the original gray rock finish and cannot be edited.
+// Player-placed stones share the same design.
+for(const key of [...fortWalls,...rocks]){const col=key%GRID,row=Math.floor(key/GRID),x=col*TILE,y=row*TILE;
+ ctx.fillStyle='#687e88';ctx.strokeStyle='#405a65';ctx.lineWidth=2;
+ roundRect(x+4,y+4,TILE-8,TILE-8,9);ctx.fill();ctx.stroke();
+ ctx.fillStyle='#9eb3bb';ctx.beginPath();ctx.moveTo(x+10,y+15);ctx.lineTo(x+23,y+8);ctx.lineTo(x+TILE-12,y+15);ctx.lineTo(x+TILE-18,y+26);ctx.closePath();ctx.fill();
+}
+// Destructible wooden barricades: separate from permanent fort stones.
+for(const key of woods){const col=key%GRID,row=Math.floor(key/GRID),x=col*TILE,y=row*TILE;
+ ctx.fillStyle='#b77d43';ctx.strokeStyle='#80522f';ctx.lineWidth=2;
+ roundRect(x+4,y+4,TILE-8,TILE-8,6);ctx.fill();ctx.stroke();
+ ctx.fillStyle='#d7a56c';ctx.fillRect(x+9,y+11,TILE-18,7);ctx.fillRect(x+9,y+25,TILE-18,7);
+ ctx.strokeStyle='#94613b';ctx.lineWidth=2;ctx.beginPath();ctx.moveTo(x+12,y+12);ctx.lineTo(x+TILE-13,y+TILE-13);ctx.moveTo(x+TILE-13,y+12);ctx.lineTo(x+12,y+TILE-13);ctx.stroke();
+ ctx.fillStyle='#5d4635';for(const px of [x+10,x+TILE-11])for(const py of [y+10,y+TILE-11]){ctx.beginPath();ctx.arc(px,py,2,0,Math.PI*2);ctx.fill()}
+}
+// Leafy bushes, usable as hiding spots in future multiplayer.
+for(const key of bushes){const col=key%GRID,row=Math.floor(key/GRID),x=col*TILE,y=row*TILE;
+ ctx.fillStyle='#347c4c';ctx.strokeStyle='#205e38';ctx.lineWidth=2;
+ for(const [ox,oy,rr] of [[16,25,13],[35,23,13],[26,15,15],[26,34,13]]){ctx.beginPath();ctx.arc(x+ox,y+oy,rr,0,Math.PI*2);ctx.fill();ctx.stroke()}
+ ctx.fillStyle='#7ed69a';for(const [ox,oy] of [[17,18],[32,12],[38,28]]){ctx.beginPath();ctx.arc(x+ox,y+oy,4,0,Math.PI*2);ctx.fill()}
+}
+// Red squares mark every forbidden tile for the currently selected block.
+// Wood is allowed beside and in the entrances to the castles; rock is not.
+if(buildType){const minC=Math.max(0,Math.floor(camera.x/TILE)),maxC=Math.min(GRID-1,Math.ceil((camera.x+VIEW)/TILE));
+ const minR=Math.max(0,Math.floor(camera.y/TILE)),maxR=Math.min(GRID-1,Math.ceil((camera.y+VIEW)/TILE));
+ for(let row=minR;row<=maxR;row++)for(let col=minC;col<=maxC;col++){
+ const key=rockKey(col,row);let forbidden=!canEdit(col,row,buildType);
+ if(rocks.has(key)||woods.has(key)||bushes.has(key))forbidden=!(buildType==='rock'?rocks:buildType==='wood'?woods:bushes).has(key);
+ if(occupiedByPlayer(col,row)&&!rocks.has(key)&&!woods.has(key)&&!bushes.has(key))forbidden=true;
+ if(!forbidden&&!((buildType==='rock'?rocks:buildType==='wood'?woods:bushes).has(key))){const own=buildType==='rock'?rocks:buildType==='wood'?woods:bushes;if(own.size>=LIMIT[buildType]||(buildType!=='bush'&&!validGroup(key,own)))forbidden=true;}
+ if(!forbidden)continue;
+ ctx.fillStyle='rgba(227,72,79,.19)';ctx.fillRect(col*TILE+2,row*TILE+2,TILE-4,TILE-4);
+ ctx.strokeStyle='rgba(210,55,63,.38)';ctx.lineWidth=1;ctx.strokeRect(col*TILE+2,row*TILE+2,TILE-4,TILE-4);
+ }
+}
+// Combat: bombs, explosions, beams and a stationary target for solo testing.
+for(const b of bombs){const x=(b.c+.5)*TILE,y=(b.r+.5)*TILE;ctx.fillStyle='#292f37';ctx.beginPath();ctx.arc(x,y,16,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#efb44f';ctx.lineWidth=4;ctx.beginPath();ctx.moveTo(x+8,y-10);ctx.lineTo(x+13,y-21);ctx.stroke();ctx.fillStyle='#fff';ctx.font='bold 12px system-ui';ctx.textAlign='center';ctx.fillText(Math.max(0,Math.ceil((2000-(performance.now()-b.t))/1000)),x,y+4)}
+if(phase==='battle'&&dummy.hp>0){ctx.fillStyle='#e27788';ctx.strokeStyle='#9c3c50';ctx.lineWidth=3;ctx.beginPath();ctx.arc(dummy.x,dummy.y,19,0,Math.PI*2);ctx.fill();ctx.stroke();ctx.fillStyle='white';ctx.font='bold 12px system-ui';ctx.textAlign='center';ctx.fillText('BOT',dummy.x,dummy.y+4);ctx.fillStyle='#9c3c50';ctx.fillRect(dummy.x-24,dummy.y-31,48,5);ctx.fillStyle='#61d0a5';ctx.fillRect(dummy.x-24,dummy.y-31,48*dummy.hp/100,5)}
+for(const beam of beams){ctx.strokeStyle='#fa55b5';ctx.lineWidth=9;ctx.lineCap='round';ctx.beginPath();ctx.moveTo(beam.sx,beam.sy);ctx.lineTo(beam.ex,beam.ey);ctx.stroke();ctx.strokeStyle='#fff1fb';ctx.lineWidth=3;ctx.stroke()}
+for(const ef of effects){if(ef.explosion){const age=(performance.now()-ef.t)/600;ctx.strokeStyle=`rgba(255,151,35,${1-age})`;ctx.lineWidth=9;ctx.beginPath();ctx.arc(ef.x,ef.y,15+TILE*3*age,0,Math.PI*2);ctx.stroke()}}
+// Player: simple cute green ball with small ears, eyes and smile.
+ctx.save();ctx.translate(player.x,player.y);
+ctx.fillStyle='#b1dcd0';ctx.beginPath();ctx.ellipse(4,17,23,9,0,0,Math.PI*2);ctx.fill();
+ctx.fillStyle='#50b979';ctx.strokeStyle='#26754f';ctx.lineWidth=2.5;
+ctx.beginPath();ctx.ellipse(-13,-17,7,12,-.35,0,Math.PI*2);ctx.fill();ctx.stroke();ctx.beginPath();ctx.ellipse(13,-17,7,12,.35,0,Math.PI*2);ctx.fill();ctx.stroke();
+ctx.beginPath();ctx.arc(0,0,R,0,Math.PI*2);ctx.fill();ctx.stroke();
+ctx.fillStyle='white';ctx.beginPath();ctx.arc(-7,-4,5.5,0,Math.PI*2);ctx.arc(7,-4,5.5,0,Math.PI*2);ctx.fill();ctx.fillStyle='#173b31';ctx.beginPath();ctx.arc(-6,-3,2.5,0,Math.PI*2);ctx.arc(8,-3,2.5,0,Math.PI*2);ctx.fill();
+ctx.strokeStyle='#173b31';ctx.lineWidth=2.2;ctx.lineCap='round';ctx.beginPath();ctx.arc(0,4,7,.12,Math.PI-.12);ctx.stroke();
+// Small direction indicator on the character.
+const [fx,fy]=directions[player.facing];ctx.fillStyle='#164c3a';ctx.beginPath();ctx.arc(fx*16,fy*16,4,0,Math.PI*2);ctx.fill();ctx.restore();
+if(phase==='battle'){ctx.fillStyle='#d9f9ed';ctx.fillRect(camera.x+10,camera.y+VIEW-38,155,27);ctx.fillStyle='#23665b';ctx.font='bold 14px system-ui';ctx.textAlign='left';ctx.fillText(`❤️ ${player.hp}  🛡️ ${player.shield}`,camera.x+19,camera.y+VIEW-20)}
+// Hide portions of the character physically covered by foliage, but keep a subtle
+// self-outline so the local player can still navigate. Opponent rendering will
+// use the same occlusion geometry without the local outline.
+for(const key of bushes){const c=key%GRID,r=Math.floor(key/GRID),bx=c*TILE,by=r*TILE;
+ if(Math.abs(player.x-(bx+TILE/2))>TILE||Math.abs(player.y-(by+TILE/2))>TILE)continue;
+ ctx.save();ctx.beginPath();ctx.rect(bx+5,by+5,TILE-10,TILE-10);ctx.clip();
+ ctx.globalAlpha=.96;ctx.fillStyle='#348451';for(const [ox,oy,rad] of [[15,27,12],[35,27,12],[25,17,13],[26,36,12]]){ctx.beginPath();ctx.arc(bx+ox,by+oy,rad,0,Math.PI*2);ctx.fill()}
+ ctx.restore();
+}
+ctx.restore();
+}
+function hasTouch(dir){return [...touchDirections.values()].includes(dir)}
+function blocked(x,y){const margin=R*.78;if(phase!=='battle'&&(x+margin>=WORLD/2||y+margin>=WORLD/2))return true;for(let row=Math.max(0,Math.floor((y-margin)/TILE));row<=Math.min(GRID-1,Math.floor((y+margin)/TILE));row++)for(let col=Math.max(0,Math.floor((x-margin)/TILE));col<=Math.min(GRID-1,Math.floor((x+margin)/TILE));col++){
+ if(!rocks.has(rockKey(col,row))&&!woods.has(rockKey(col,row))&&!fortWalls.has(rockKey(col,row)))continue;const rx=col*TILE,ry=row*TILE;
+ const nearX=Math.max(rx,Math.min(x,rx+TILE)),nearY=Math.max(ry,Math.min(y,ry+TILE));
+ if((nearX-x)**2+(nearY-y)**2<margin**2)return true;
+}return false}
+let prev=performance.now();function frame(now){const dt=Math.min((now-prev)/1000,.05);prev=now;if(phase==='prep'){secondsLeft=Math.max(0,secondsLeft-dt);if(secondsLeft===0){phase='battle';setMode(null);modeButton.disabled=true;}updateHud();}let dx=(keys.has('d')||keys.has('arrowright')?1:0)-(keys.has('a')||keys.has('arrowleft')?1:0)+(hasTouch('right')?1:0)-(hasTouch('left')?1:0),dy=(keys.has('s')||keys.has('arrowdown')?1:0)-(keys.has('w')||keys.has('arrowup')?1:0)+(hasTouch('down')?1:0)-(hasTouch('up')?1:0);if(buildType){dx=0;dy=0}if(!buildType&&(dx||dy)){if(Math.abs(dx)>Math.abs(dy))player.facing=dx>0?'right':'left';else player.facing=dy>0?'down':'up'}const mag=Math.hypot(dx,dy);if(mag>1){dx/=mag;dy/=mag}if(!buildType){const nx=Math.max(R+12,Math.min(WORLD-R-12,player.x+dx*SPEED*dt));if(!blocked(nx,player.y))player.x=nx;
+const ny=Math.max(R+12,Math.min(WORLD-R-12,player.y+dy*SPEED*dt));if(!blocked(player.x,ny))player.y=ny;}if(phase==='battle')updateCombat(now);camera.x=Math.max(0,Math.min(WORLD-VIEW,player.x-VIEW/2));camera.y=Math.max(0,Math.min(WORLD-VIEW,player.y-VIEW/2));draw();requestAnimationFrame(frame)}requestAnimationFrame(frame);
+</script></body></html>
