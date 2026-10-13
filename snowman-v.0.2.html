@@ -1,0 +1,42 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"><meta name="theme-color" content="#b9e9fa"><title>Snowfall — Map Prototype 0.2</title><style>*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#a8d9ed;font-family:system-ui,sans-serif;touch-action:none}canvas{display:block;width:100%;height:100%;touch-action:none}#hud{position:fixed;left:14px;top:max(12px,env(safe-area-inset-top));padding:10px 14px;border-radius:14px;background:#15364bc9;color:white;pointer-events:none;box-shadow:0 3px 15px #25475b35}#hud strong{font-size:16px}#hud small{display:block;opacity:.85;font-size:12px;margin-top:3px}#stick{position:fixed;bottom:max(26px,env(safe-area-inset-bottom));left:24px;width:130px;height:130px;border:2px solid #ffffff9c;border-radius:50%;background:#16394c45;touch-action:none;display:grid;place-items:center;user-select:none}#knob{width:55px;height:55px;border-radius:50%;background:#f7fdffda;border:3px solid #a5d5eb;box-shadow:0 2px 8px #16394c66;transform:translate(0,0)}#tip{position:fixed;right:14px;bottom:max(22px,env(safe-area-inset-bottom));color:white;text-shadow:0 1px 5px #143648;background:#14364880;padding:9px 12px;border-radius:12px;font-size:12px;max-width:170px;text-align:right;pointer-events:none}@media(pointer:fine){#stick{opacity:.7}}</style></head><body><canvas id="game"></canvas><div id="hud"><strong>☃️ SNOWFALL</strong><small>Map prototype · v0.2</small></div><div id="stick"><div id="knob"></div></div><div id="tip">Explore your base!<br>Joystick or WASD / arrows</div><script>
+'use strict';
+const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');let W=0,H=0,dpr=1;
+function resize(){dpr=Math.min(devicePixelRatio||1,2);W=innerWidth;H=innerHeight;canvas.width=Math.round(W*dpr);canvas.height=Math.round(H*dpr);ctx.setTransform(dpr,0,0,dpr,0,0)}addEventListener('resize',resize);resize();
+const world={w:620,h:590}, player={x:310,y:310,r:19},keys=new Set(),input={x:0,y:0};
+const obstacles=[{x:142,y:166,w:72,h:60,type:'woodpile'},{x:408,y:170,w:75,h:60,type:'woodpile'},{x:152,y:426,w:72,h:60,type:'snowpile'},{x:410,y:418,w:72,h:60,type:'snowpile'}];
+const pines=[{x:110,y:132,s:.8},{x:516,y:132,s:.8},{x:107,y:484,s:.75},{x:512,y:485,s:.8}];
+let flakes=Array.from({length:85},(_,i)=>({x:(i*137.6)%world.w,y:(i*91.3)%world.h,r:1.2+(i%4)*.45}));
+function rounded(x,y,w,h,r){ctx.beginPath();ctx.roundRect(x,y,w,h,r)}
+function drawPine(t){ctx.save();ctx.translate(t.x,t.y);ctx.scale(t.s,t.s);ctx.fillStyle='#678b9d55';ctx.beginPath();ctx.ellipse(7,16,43,19,-.4,0,7);ctx.fill();ctx.fillStyle='#644e3b';ctx.fillRect(-6,4,12,27);for(let j=0;j<3;j++){ctx.fillStyle=['#236b66','#287c70','#319183'][j];ctx.beginPath();ctx.moveTo(0,-55+j*19);ctx.lineTo(-35+j*3,6+j*13);ctx.lineTo(35-j*3,6+j*13);ctx.closePath();ctx.fill()}ctx.fillStyle='#e7faff';ctx.beginPath();ctx.moveTo(0,-55);ctx.lineTo(-19,-22);ctx.quadraticCurveTo(-4,-27,3,-23);ctx.lineTo(17,-22);ctx.closePath();ctx.fill();ctx.restore()}
+function drawObstacle(o){ctx.save();ctx.fillStyle='#5a7d8b35';rounded(o.x+6,o.y+9,o.w,o.h,12);ctx.fill();if(o.type==='snowpile'){ctx.fillStyle='#d7f2fa';rounded(o.x,o.y,o.w,o.h,24);ctx.fill();ctx.strokeStyle='#a5d7e8';ctx.lineWidth=3;ctx.stroke();ctx.fillStyle='#f8feff';ctx.beginPath();ctx.ellipse(o.x+o.w*.43,o.y+o.h*.35,o.w*.32,o.h*.24,-.2,0,7);ctx.fill()}else{ctx.fillStyle=o.type==='crate'?'#a77848':'#9b7046';rounded(o.x,o.y,o.w,o.h,8);ctx.fill();ctx.strokeStyle='#69472d';ctx.lineWidth=5;ctx.stroke();ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(o.x+7,o.y+8);ctx.lineTo(o.x+o.w-7,o.y+o.h-8);ctx.moveTo(o.x+o.w-7,o.y+8);ctx.lineTo(o.x+7,o.y+o.h-8);ctx.stroke();ctx.strokeStyle='#d9a776';ctx.lineWidth=3;ctx.beginPath();ctx.moveTo(o.x+8,o.y+o.h*.5);ctx.lineTo(o.x+o.w-8,o.y+o.h*.5);ctx.stroke()}ctx.restore()}
+function drawWalls(){const step=42;ctx.fillStyle='#7698a85c';ctx.fillRect(42,42,world.w-84,world.h-84);ctx.fillStyle='#e6f7ff';ctx.fillRect(54,54,world.w-108,world.h-108);for(let x=42;x<world.w-42;x+=step){drawLog(x,39,Math.min(step,world.w-42-x),20);drawLog(x,world.h-59,Math.min(step,world.w-42-x),20)}for(let y=59;y<world.h-59;y+=step){drawLog(39,y,20,Math.min(step,world.h-59-y));drawLog(world.w-59,y,20,Math.min(step,world.h-59-y))}function drawLog(x,y,w,h){ctx.fillStyle='#7d5335';rounded(x,y,w,h,4);ctx.fill();ctx.fillStyle='#b98a57';rounded(x+2,y+2,Math.max(2,w-4),Math.max(2,h-5),3);ctx.fill();ctx.strokeStyle='#70452f';ctx.lineWidth=1.5;ctx.stroke();ctx.fillStyle='#d3aa75';ctx.beginPath();ctx.arc(x+w*.28,y+h*.5,2.5,0,7);ctx.fill()}}
+function drawSnowman(){ctx.save();ctx.translate(player.x,player.y);ctx.fillStyle='#476f8050';ctx.beginPath();ctx.ellipse(5,19,23,10,0,0,7);ctx.fill();ctx.fillStyle='#f9feff';ctx.strokeStyle='#b3d9e8';ctx.lineWidth=2.5;ctx.beginPath();ctx.arc(0,5,19,0,7);ctx.fill();ctx.stroke();ctx.beginPath();ctx.arc(0,-15,14,0,7);ctx.fill();ctx.stroke();ctx.fillStyle='#293e4b';ctx.beginPath();ctx.arc(-5,-18,2.2,0,7);ctx.arc(5,-18,2.2,0,7);ctx.fill();ctx.fillStyle='#ed8a37';ctx.beginPath();ctx.moveTo(0,-14);ctx.lineTo(13,-10);ctx.lineTo(0,-9);ctx.closePath();ctx.fill();ctx.fillStyle='#2b4c59';ctx.beginPath();ctx.arc(0,1,2.2,0,7);ctx.arc(0,10,2.2,0,7);ctx.fill();ctx.fillStyle='#4b7391';ctx.fillRect(-13,-32,26,5);ctx.fillRect(-9,-47,18,16);ctx.restore()}
+function intersects(x,y,o){let cx=Math.max(o.x,Math.min(x,o.x+o.w)),cy=Math.max(o.y,Math.min(y,o.y+o.h));return (x-cx)**2+(y-cy)**2<(player.r+3)**2}
+function move(dx,dy){const nx=Math.max(80+player.r,Math.min(world.w-80-player.r,player.x+dx));if(!obstacles.some(o=>intersects(nx,player.y,o)))player.x=nx;const ny=Math.max(80+player.r,Math.min(world.h-80-player.r,player.y+dy));if(!obstacles.some(o=>intersects(player.x,ny,o)))player.y=ny}
+let lastTime=0;
+function frame(t){
+ const dt=Math.min((t-(lastTime||t))/1000,.05);lastTime=t;
+ let vx=input.x,vy=input.y;
+ if(keys.has('arrowleft')||keys.has('a'))vx-=1;
+ if(keys.has('arrowright')||keys.has('d'))vx+=1;
+ if(keys.has('arrowup')||keys.has('w'))vy-=1;
+ if(keys.has('arrowdown')||keys.has('s'))vy+=1;
+ const mag=Math.hypot(vx,vy);
+ // Same world-units-per-second on desktop and mobile, independent of FPS.
+ if(mag>.04)move(vx/mag*175*dt,vy/mag*175*dt);
+ ctx.clearRect(0,0,W,H);ctx.fillStyle='#b5e3f2';ctx.fillRect(0,0,W,H);
+ // Keep a constant vertical view of the world on phones and PCs.
+ // Portrait screens naturally show less horizontally than wide monitors.
+ const scale=H/680;
+ const ox=W/2-player.x*scale,oy=H/2-player.y*scale;
+ ctx.save();ctx.translate(ox,oy);ctx.scale(scale,scale);
+ ctx.fillStyle='#dff4fc';ctx.fillRect(0,0,world.w,world.h);
+ for(let i=0;i<flakes.length;i++){const f=flakes[i];ctx.fillStyle=i%3===0?'#fff':'#c8e9f6';ctx.beginPath();ctx.arc(f.x,f.y,f.r,0,7);ctx.fill()}
+ drawWalls();ctx.fillStyle='#b5dce8';ctx.font='bold 20px system-ui';ctx.textAlign='center';ctx.fillText('YOUR LITTLE WORLD',world.w/2,103);
+ for(const tree of pines)drawPine(tree);
+ for(const o of obstacles)drawObstacle(o);
+ drawSnowman();ctx.restore();requestAnimationFrame(frame)
+}requestAnimationFrame(frame);
+addEventListener('keydown',e=>{const k=e.key.toLowerCase();if(['arrowup','arrowdown','arrowleft','arrowright','w','a','s','d'].includes(k)){keys.add(k);e.preventDefault()}});addEventListener('keyup',e=>keys.delete(e.key.toLowerCase()));addEventListener('blur',()=>{keys.clear();input.x=0;input.y=0;knob.style.transform='translate(0,0)'});
+const stick=document.getElementById('stick'),knob=document.getElementById('knob');let pointer=null;function updateStick(e){const r=stick.getBoundingClientRect(),cx=r.left+r.width/2,cy=r.top+r.height/2;let x=e.clientX-cx,y=e.clientY-cy;const length=Math.hypot(x,y),max=43;if(length>max){x*=max/length;y*=max/length}input.x=x/max;input.y=y/max;knob.style.transform=`translate(${x}px,${y}px)`}stick.addEventListener('pointerdown',e=>{if(pointer!==null)return;pointer=e.pointerId;stick.setPointerCapture(pointer);updateStick(e)});stick.addEventListener('pointermove',e=>{if(e.pointerId===pointer)updateStick(e)});function end(e){if(e.pointerId!==pointer)return;pointer=null;input.x=0;input.y=0;knob.style.transform='translate(0,0)'}stick.addEventListener('pointerup',end);stick.addEventListener('pointercancel',end);
+</script></body></html>
