@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover,user-scalable=no"><title>SNOWMAN v0.8 — Rock building test</title>
+<style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;height:100dvh;overflow:hidden;background:#132b32;font-family:system-ui,-apple-system,sans-serif;touch-action:none}
+body{display:flex;align-items:center;justify-content:center}
+#layout{display:flex;flex-direction:column;align-items:center;justify-content:center;width:100%;height:100%;gap:0}
+#game{position:relative;width:min(100vw,100dvh);height:min(100vw,100dvh);aspect-ratio:1;background:#edf9f7;overflow:hidden;flex:none;box-shadow:0 0 0 2px #557a7c}
+canvas{display:block;width:100%;height:100%;touch-action:none}
+#label{position:absolute;top:10px;left:12px;font-weight:900;letter-spacing:1px;color:#2d6665;font-size:clamp(12px,2.7vw,16px);pointer-events:none}#label small{font-weight:500;letter-spacing:0}
+#controls{display:none;flex:none;align-items:center;justify-content:center;width:100%;height:190px;touch-action:none;user-select:none;-webkit-user-select:none;position:relative}
+#dpad{width:220px;height:188px;display:grid;grid-template-columns:repeat(3,1fr);grid-template-rows:repeat(3,1fr);gap:0;touch-action:none;user-select:none;-webkit-user-select:none}
+.dir{border:0;border-radius:18px;background:#b9e7de;color:#285c56;font-size:26px;font-weight:900;display:flex;align-items:center;justify-content:center;touch-action:none;-webkit-tap-highlight-color:transparent;cursor:pointer;padding:0;box-shadow:inset 0 0 0 2px #a6d7d0;margin:2px}
+.dir.pressed{background:#61b8a7;color:white}
+.dir[data-dir="up"]{grid-column:2;grid-row:1}.dir[data-dir="left"]{grid-column:1;grid-row:2}.dir[data-dir="down"]{grid-column:2;grid-row:3}.dir[data-dir="right"]{grid-column:3;grid-row:2}
+#mode{position:absolute;right:10px;top:12px;border:2px solid #92cbbf;border-radius:12px;background:#c9eee5;color:#245c54;font-weight:800;padding:13px 10px;touch-action:manipulation;font-size:13px}
+#mode.active{background:#65c9aa;color:#123f36}
+#info{position:absolute;left:9px;top:14px;font-size:11px;color:#b5d6d0;max-width:95px;line-height:1.4}
+#hint{position:absolute;right:12px;bottom:12px;color:#28595a;font-size:12px;background:#e9fffaaf;border-radius:8px;padding:6px 9px;pointer-events:none}
+@media(pointer:coarse){#controls{display:flex}#game{width:min(100vw,calc(100dvh - 190px - env(safe-area-inset-bottom)));height:min(100vw,calc(100dvh - 190px - env(safe-area-inset-bottom)))}#hint{display:none}#controls:has(#mode.active) #dpad{opacity:.25;pointer-events:none}}
+@media(min-width:800px) and (pointer:fine){#game{border-radius:6px}}
+</style></head><body><div id="layout"><div id="game"><canvas id="screen" width="640" height="640"></canvas><div id="label">☃️ SNOWMAN <small>v0.8 · Rock test</small></div><div id="hint">24×24 grid · WASD / Arrows · B to build</div></div><div id="controls"><div id="info">MOVE: arrows<br>BUILD: tap a square</div><div id="dpad" aria-label="Movement controls"><button class="dir" data-dir="up" aria-label="Up">▲</button><button class="dir" data-dir="left" aria-label="Left">◀</button><button class="dir" data-dir="right" aria-label="Right">▶</button><button class="dir" data-dir="down" aria-label="Down">▼</button></div><button id="mode" type="button">🪨 BUILD</button></div></div>
+<script>
+'use strict';
+const canvas=document.getElementById('screen'),ctx=canvas.getContext('2d');
+const VIEW=640,WORLD=1280,R=20,SPEED=215;
+// 24 x 24 equal building tiles. Every quadrant has exactly 12 x 12 = 144 tiles.
+const GRID=24,TILE=WORLD/GRID;
+const starts=[{x:160,y:160},{x:1120,y:160},{x:160,y:1120},{x:1120,y:1120}];
+const player={x:starts[0].x,y:starts[0].y};let camera={x:0,y:0};
+const keys=new Set(),touchDirections=new Map();
+const rocks=new Set();let building=false;const modeButton=document.getElementById('mode');
+function setMode(value){building=value;modeButton.classList.toggle('active',building);modeButton.textContent=building?'✓ DONE':'🪨 BUILD';clearInput()}
+modeButton.addEventListener('click',()=>setMode(!building));
+const rockKey=(col,row)=>row*GRID+col;
+function canBuild(col,row){if(col<0||row<0||col>=12||row>=12)return false;
+ const cx=(col+.5)*TILE,cy=(row+.5)*TILE;
+ if(Math.hypot(cx-player.x,cy-player.y)>3.5*TILE)return false;
+ if(Math.abs(cx-player.x)<TILE*.75&&Math.abs(cy-player.y)<TILE*.75)return false;
+ return true}
+canvas.addEventListener('pointerdown',e=>{if(!building)return;e.preventDefault();const rect=canvas.getBoundingClientRect();
+ const x=(e.clientX-rect.left)/rect.width*VIEW+camera.x,y=(e.clientY-rect.top)/rect.height*VIEW+camera.y;
+ const col=Math.floor(x/TILE),row=Math.floor(y/TILE),key=rockKey(col,row);
+ if(rocks.has(key)){rocks.delete(key);return}if(canBuild(col,row))rocks.add(key);
+});
+
+const directionButtons=[...document.querySelectorAll('.dir')];
+function updateButtons(){for(const button of directionButtons){button.classList.toggle('pressed',[...touchDirections.values()].includes(button.dataset.dir))}}
+addEventListener('keydown',e=>{if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight',' ','w','a','s','d','W','A','S','D'].includes(e.key))e.preventDefault();if(e.key.toLowerCase()==='b'&&!e.repeat){setMode(!building);return}keys.add(e.key.toLowerCase())});
+addEventListener('keyup',e=>keys.delete(e.key.toLowerCase()));
+function clearInput(){keys.clear();touchDirections.clear();updateButtons()}
+addEventListener('blur',clearInput);document.addEventListener('visibilitychange',()=>{if(document.hidden)clearInput()});
+const dpad=document.getElementById('dpad');
+function padDirection(e){const r=dpad.getBoundingClientRect(),x=(e.clientX-r.left)/r.width-.5,y=(e.clientY-r.top)/r.height-.5;
+ if(Math.abs(x)<.15&&Math.abs(y)<.15)return null;
+ return Math.abs(x)>Math.abs(y)?(x<0?'left':'right'):(y<0?'up':'down')}
+dpad.addEventListener('pointerdown',e=>{if(building)return;e.preventDefault();dpad.setPointerCapture(e.pointerId);const d=padDirection(e);if(d)touchDirections.set(e.pointerId,d);updateButtons()});
+dpad.addEventListener('pointermove',e=>{if(!touchDirections.has(e.pointerId))return;e.preventDefault();const d=padDirection(e);if(d)touchDirections.set(e.pointerId,d);updateButtons()});
+for(const ev of ['pointerup','pointercancel','lostpointercapture'])dpad.addEventListener(ev,e=>{touchDirections.delete(e.pointerId);updateButtons()});
+dpad.addEventListener('contextmenu',e=>e.preventDefault());
+function roundRect(x,y,w,h,r){ctx.beginPath();ctx.roundRect(x,y,w,h,r)}
+function draw(){
+ctx.clearRect(0,0,VIEW,VIEW);ctx.fillStyle='#eaf8f4';ctx.fillRect(0,0,VIEW,VIEW);
+ctx.save();ctx.translate(-camera.x,-camera.y);
+// Same arena, four symmetric starts; same arena and spawn points as v0.5.
+ctx.fillStyle='#f8fffc';ctx.fillRect(0,0,WORLD,WORLD);
+// Visible placement grid, aligned exactly across all four equally sized quadrants.
+ctx.beginPath();ctx.lineWidth=1;ctx.strokeStyle='#d8e8e4';
+for(let n=0;n<=GRID;n++){let p=n*TILE;ctx.moveTo(p,0);ctx.lineTo(p,WORLD);ctx.moveTo(0,p);ctx.lineTo(WORLD,p)}ctx.stroke();
+// Subtle boundary around each of the four equal 12x12 building territories.
+ctx.lineWidth=3;ctx.strokeStyle='#a4d2c7';
+for(let row=0;row<2;row++)for(let col=0;col<2;col++)ctx.strokeRect(col*WORLD/2+2,row*WORLD/2+2,WORLD/2-4,WORLD/2-4);
+ctx.strokeStyle='#b7d9d5';ctx.lineWidth=2;ctx.setLineDash([14,16]);ctx.beginPath();ctx.moveTo(WORLD/2,0);ctx.lineTo(WORLD/2,WORLD);ctx.moveTo(0,WORLD/2);ctx.lineTo(WORLD,WORLD/2);ctx.stroke();ctx.setLineDash([]);
+ctx.lineWidth=12;ctx.strokeStyle='#376d72';ctx.strokeRect(6,6,WORLD-12,WORLD-12);
+starts.forEach((p,i)=>{ctx.beginPath();ctx.arc(p.x,p.y,98,0,Math.PI*2);ctx.fillStyle='#d4f2e9';ctx.fill();ctx.lineWidth=4;ctx.strokeStyle='#83c5b6';ctx.stroke();ctx.beginPath();ctx.arc(p.x,p.y,73,0,Math.PI*2);ctx.strokeStyle='#b4ded2';ctx.lineWidth=2;ctx.stroke();ctx.fillStyle='#47877e';ctx.font='bold 22px system-ui';ctx.textAlign='center';ctx.fillText('START '+(i+1),p.x,p.y+129)});
+// Rock blocks snap to tiles. Tap an existing rock in BUILD mode to remove it.
+for(const key of rocks){const col=key%GRID,row=Math.floor(key/GRID),x=col*TILE,y=row*TILE;
+ ctx.fillStyle='#687e88';ctx.strokeStyle='#405a65';ctx.lineWidth=2;
+ roundRect(x+4,y+4,TILE-8,TILE-8,9);ctx.fill();ctx.stroke();
+ ctx.fillStyle='#9eb3bb';ctx.beginPath();ctx.moveTo(x+10,y+15);ctx.lineTo(x+23,y+8);ctx.lineTo(x+TILE-12,y+15);ctx.lineTo(x+TILE-18,y+26);ctx.closePath();ctx.fill();
+}
+// Player: simple cute green ball with small ears, eyes and smile.
+ctx.save();ctx.translate(player.x,player.y);
+ctx.fillStyle='#b1dcd0';ctx.beginPath();ctx.ellipse(4,17,23,9,0,0,Math.PI*2);ctx.fill();
+ctx.fillStyle='#50b979';ctx.strokeStyle='#26754f';ctx.lineWidth=2.5;
+ctx.beginPath();ctx.ellipse(-13,-17,7,12,-.35,0,Math.PI*2);ctx.fill();ctx.stroke();ctx.beginPath();ctx.ellipse(13,-17,7,12,.35,0,Math.PI*2);ctx.fill();ctx.stroke();
+ctx.beginPath();ctx.arc(0,0,R,0,Math.PI*2);ctx.fill();ctx.stroke();
+ctx.fillStyle='white';ctx.beginPath();ctx.arc(-7,-4,5.5,0,Math.PI*2);ctx.arc(7,-4,5.5,0,Math.PI*2);ctx.fill();ctx.fillStyle='#173b31';ctx.beginPath();ctx.arc(-6,-3,2.5,0,Math.PI*2);ctx.arc(8,-3,2.5,0,Math.PI*2);ctx.fill();
+ctx.strokeStyle='#173b31';ctx.lineWidth=2.2;ctx.lineCap='round';ctx.beginPath();ctx.arc(0,4,7,.12,Math.PI-.12);ctx.stroke();ctx.restore();ctx.restore();
+}
+function hasTouch(dir){return [...touchDirections.values()].includes(dir)}
+function blocked(x,y){const margin=R*.78;for(let row=Math.max(0,Math.floor((y-margin)/TILE));row<=Math.min(GRID-1,Math.floor((y+margin)/TILE));row++)for(let col=Math.max(0,Math.floor((x-margin)/TILE));col<=Math.min(GRID-1,Math.floor((x+margin)/TILE));col++){
+ if(!rocks.has(rockKey(col,row)))continue;const rx=col*TILE,ry=row*TILE;
+ const nearX=Math.max(rx,Math.min(x,rx+TILE)),nearY=Math.max(ry,Math.min(y,ry+TILE));
+ if((nearX-x)**2+(nearY-y)**2<margin**2)return true;
+}return false}
+let prev=performance.now();function frame(now){const dt=Math.min((now-prev)/1000,.05);prev=now;let dx=(keys.has('d')||keys.has('arrowright')?1:0)-(keys.has('a')||keys.has('arrowleft')?1:0)+(hasTouch('right')?1:0)-(hasTouch('left')?1:0),dy=(keys.has('s')||keys.has('arrowdown')?1:0)-(keys.has('w')||keys.has('arrowup')?1:0)+(hasTouch('down')?1:0)-(hasTouch('up')?1:0);if(building){dx=0;dy=0}const mag=Math.hypot(dx,dy);if(mag>1){dx/=mag;dy/=mag}if(!building){const nx=Math.max(R+12,Math.min(WORLD-R-12,player.x+dx*SPEED*dt));if(!blocked(nx,player.y))player.x=nx;
+const ny=Math.max(R+12,Math.min(WORLD-R-12,player.y+dy*SPEED*dt));if(!blocked(player.x,ny))player.y=ny;}camera.x=Math.max(0,Math.min(WORLD-VIEW,player.x-VIEW/2));camera.y=Math.max(0,Math.min(WORLD-VIEW,player.y-VIEW/2));draw();requestAnimationFrame(frame)}requestAnimationFrame(frame);
+</script></body></html>
